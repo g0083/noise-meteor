@@ -3,117 +3,237 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Noise Meter</title>
+    <title>Pro Noise Analyzer</title>
     <link rel="manifest" href="manifest.json">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { font-family: sans-serif; margin: 0; background: #000; color: #fff; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; }
-        .container { width: 90%; max-width: 500px; }
-        h1 { font-size: 1.5rem; color: #aaa; }
+        body { font-family: sans-serif; margin: 0; background: #000; color: #fff; text-align: center; overflow-x: hidden; }
+        .screen { display: none; padding: 10px; flex-direction: column; align-items: center; min-height: 100vh; box-sizing: border-box; }
+        .active { display: flex; }
         
-        /* デシベル表示 */
-        #db-display { font-size: 5rem; font-weight: bold; margin: 20px 0; transition: color 0.2s; }
-        
-        /* ゲージの外枠 */
-        .meter-bg { width: 100%; height: 30px; background: #333; border-radius: 15px; overflow: hidden; margin-bottom: 30px; }
-        /* ゲージの中身 */
-        #meter-bar { width: 0%; height: 100%; background: #00ff00; transition: width 0.1s; }
-        
-        button { width: 100%; padding: 20px; font-size: 1.2rem; font-weight: bold; border: none; border-radius: 10px; cursor: pointer; background: #007bff; color: white; }
-        .status { margin-top: 10px; color: #666; font-size: 0.9rem; }
+        .db-container { margin: 5px 0; }
+        #db-value { font-size: 4rem; font-weight: bold; line-height: 1; }
+        #db-example { color: #00ff00; font-size: 1.1rem; margin-top: 5px; height: 1.5rem; }
+        #avg-value { font-size: 0.9rem; color: #aaa; margin-top: 5px; }
+
+        .canvas-container { 
+            width: 100%; max-width: 500px; background: #111; border-radius: 10px; 
+            margin: 10px 0; padding: 15px; box-sizing: border-box; position: relative;
+        }
+        canvas { width: 100% !important; height: auto !important; }
+
+        /* レイアウト修正：縦軸とカラーバー */
+        .flex-row { display: flex; width: 100%; align-items: stretch; gap: 8px; }
+        .y-axis-label { 
+            width: 35px; font-size: 0.7rem; color: #888; 
+            display: flex; flex-direction: column; justify-content: space-between; 
+            padding-bottom: 20px; /* X軸ラベル分の余白 */
+            text-align: right;
+        }
+
+        /* 凡例カラーバーの修正 */
+        .legend-container { display: flex; flex-direction: row; gap: 4px; padding-bottom: 20px; }
+        .legend-bar { 
+            width: 12px; 
+            min-height: 100px; /* 高さを確保 */
+            background: linear-gradient(to top, #0000ff, #00ffff, #00ff00, #ffff00, #ff0000); 
+            border-radius: 2px;
+            border: 1px solid #333;
+        }
+        .legend-labels { 
+            display: flex; flex-direction: column; justify-content: space-between; 
+            font-size: 0.65rem; color: #888; height: 100%;
+        }
+
+        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; max-width: 500px; }
+        button { padding: 15px; font-size: 1rem; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; color: white; }
+        .btn-blue { background: #007bff; }
+        .btn-green { background: #28a745; }
+        .btn-red { background: #dc3545; }
+        .btn-gray { background: #555; }
+        h2 { font-size: 1.1rem; margin: 5px 0; color: #aaa; }
     </style>
 </head>
 <body>
 
-    <div class="container">
-        <h1>[ Sound Level Meter ]</h1>
-        <div id="db-display">0.0 dB</div>
+    <div id="main-screen" class="screen active">
+        <h2>[ Noise History ]</h2>
+        <div class="db-container">
+            <div id="db-value">0.0 dB</div>
+            <div id="db-example">測定待機中</div>
+            <div id="avg-value">平均: -- dB</div>
+        </div>
+        <div class="canvas-container">
+            <canvas id="historyChart"></canvas>
+            <p style="font-size: 0.7rem; color: #555; margin: 0;">横軸: 時間 / 縦軸: dB</p>
+        </div>
+        <div class="controls">
+            <button id="start-btn" class="btn-green">測定開始</button>
+            <button id="reset-btn" class="btn-red">平均リセット</button>
+            <button onclick="switchScreen('freq-screen')" class="btn-blue" style="grid-column: span 2;">周波数解析モード</button>
+        </div>
+    </div>
+
+    <div id="freq-screen" class="screen">
+        <h2>[ FFT & Spectrogram ]</h2>
         
-        <div class="meter-bg">
-            <div id="meter-bar"></div>
+        <div class="canvas-container">
+            <div class="flex-row">
+                <div class="y-axis-label"><span>90</span><span>60</span><span>30</span><span>0</span></div>
+                <div style="flex:1;">
+                    <canvas id="fftCanvas" height="120"></canvas>
+                    <div style="display:flex; justify-content: space-between; font-size: 0.7rem; color: #888; margin-top:2px;">
+                        <span>0Hz</span><span>5k</span><span>10k</span><span>20kHz</span>
+                    </div>
+                </div>
+            </div>
         </div>
 
-        <button id="start-btn">測定開始</button>
-        <p class="status" id="status-text">マイクの使用を許可してください</p>
+        <div class="canvas-container">
+            <div class="flex-row">
+                <div class="y-axis-label"><span>20k</span><span>10k</span><span>5k</span><span>Low</span></div>
+                <div style="flex:1;">
+                    <canvas id="spectrogramCanvas" height="180"></canvas>
+                </div>
+                <div class="legend-container">
+                    <div class="legend-bar"></div>
+                    <div class="legend-labels">
+                        <span>90+</span><span>60</span><span>30</span><span>0</span>
+                    </div>
+                </div>
+            </div>
+            <p style="font-size: 0.7rem; color: #555; margin: 5px 0 0 0;">← 時間の流れ (dBカラー表示)</p>
+        </div>
+
+        <div class="controls" style="grid-template-columns: 1fr;">
+            <button onclick="switchScreen('main-screen')" class="btn-gray">メイン画面に戻る</button>
+        </div>
     </div>
 
     <script>
-        // PWAのサービスワーカー登録
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js').then(() => console.log('PWA Ready'));
-        }
-
-        const startBtn = document.getElementById('start-btn');
-        const dbDisplay = document.getElementById('db-display');
-        const meterBar = document.getElementById('meter-bar');
-        const statusText = document.getElementById('status-text');
-
-        let audioContext;
-        let analyser;
-        let dataArray;
+        let audioContext, analyser, dataArray, stream;
         let isMeasuring = false;
+        let totalDb = 0, count = 0;
+        let lastHistoryUpdate = 0;
 
-        startBtn.onclick = async () => {
-            if (isMeasuring) {
-                location.reload(); // 簡易的にリロードで停止
-                return;
+        const historyPoints = 100;
+        const ctx = document.getElementById('historyChart').getContext('2d');
+        const historyChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: Array(historyPoints).fill(''),
+                datasets: [{ 
+                    data: Array(historyPoints).fill(0), 
+                    borderColor: '#00ff00', borderWidth: 2, pointRadius: 0,
+                    fill: true, backgroundColor: 'rgba(0, 255, 0, 0.1)', tension: 0.2 
+                }]
+            },
+            options: {
+                animation: false,
+                scales: { y: { min: 20, max: 100, ticks: { color: '#555' } }, x: { display: false } },
+                plugins: { legend: { display: false } }
             }
+        });
 
+        const fftCanvas = document.getElementById('fftCanvas');
+        const fftCtx = fftCanvas.getContext('2d');
+        const specCanvas = document.getElementById('spectrogramCanvas');
+        const specCtx = specCanvas.getContext('2d');
+        const specTempCanvas = document.createElement('canvas');
+        const specTempCtx = specTempCanvas.getContext('2d');
+
+        async function startAudio() {
             try {
-                // マイクへのアクセス
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 const source = audioContext.createMediaStreamSource(stream);
-                
                 analyser = audioContext.createAnalyser();
-                analyser.fftSize = 256;
+                analyser.fftSize = 512;
                 source.connect(analyser);
-
-                const bufferLength = analyser.frequencyBinCount;
-                dataArray = new Uint8Array(bufferLength);
-
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
                 isMeasuring = true;
-                startBtn.innerText = "測定停止（リロード）";
-                statusText.innerText = "測定中...";
+                document.getElementById('start-btn').innerText = "測定中...";
                 update();
-            } catch (err) {
-                alert("マイクの起動に失敗しました: " + err);
-            }
-        };
+            } catch (err) { alert("マイクを許可してください"); }
+        }
 
         function update() {
             if (!isMeasuring) return;
             requestAnimationFrame(update);
 
             analyser.getByteTimeDomainData(dataArray);
-
-            // 実効値（RMS）の計算
             let sum = 0;
             for (let i = 0; i < dataArray.length; i++) {
-                let v = (dataArray[i] - 128) / 128; // -1.0 to 1.0 に正規化
+                let v = (dataArray[i] - 128) / 128;
                 sum += v * v;
             }
             let rms = Math.sqrt(sum / dataArray.length);
-
-            // デシベル換算（マイク感度調整のため+30程度のオフセットを追加）
-            let db = rms > 0 ? 20 * Math.log10(rms) + 90 : 0;
+            let db = rms > 0 ? 20 * Math.log10(rms) + 95 : 0;
             if (db < 0) db = 0;
 
-            // 表示更新
-            dbDisplay.innerText = db.toFixed(1) + " dB";
-            meterBar.style.width = Math.min(db, 100) + "%";
+            document.getElementById('db-value').innerText = db.toFixed(1) + " dB";
+            document.getElementById('db-example').innerText = getExample(db);
+            totalDb += db; count++;
+            document.getElementById('avg-value').innerText = `平均: ${(totalDb / count).toFixed(1)} dB`;
 
-            // 色の変化
-            if (db > 80) {
-                dbDisplay.style.color = "#ff4d4d";
-                meterBar.style.background = "#ff4d4d";
-            } else if (db > 60) {
-                dbDisplay.style.color = "#ffcc00";
-                meterBar.style.background = "#ffcc00";
-            } else {
-                dbDisplay.style.color = "#00ff00";
-                meterBar.style.background = "#00ff00";
+            let now = Date.now();
+            if (now - lastHistoryUpdate > 100) {
+                historyChart.data.datasets[0].data.push(db);
+                historyChart.data.datasets[0].data.shift();
+                historyChart.update('none');
+                lastHistoryUpdate = now;
+            }
+
+            drawFFTAndSpec();
+        }
+
+        function drawFFTAndSpec() {
+            const freqData = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteFrequencyData(freqData);
+
+            // FFT描画
+            fftCtx.fillStyle = '#111';
+            fftCtx.fillRect(0, 0, fftCanvas.width, fftCanvas.height);
+            const barWidth = fftCanvas.width / freqData.length;
+            for (let i = 0; i < freqData.length; i++) {
+                const h = (freqData[i] / 255) * fftCanvas.height;
+                // 色をdB連動させる
+                fftCtx.fillStyle = `hsl(${240 - (freqData[i]/255)*240}, 100%, 50%)`;
+                fftCtx.fillRect(i * barWidth, fftCanvas.height - h, barWidth - 1, h);
+            }
+
+            // スペクトログラム描画
+            if (document.getElementById('freq-screen').classList.contains('active')) {
+                specTempCanvas.width = specCanvas.width;
+                specTempCanvas.height = specCanvas.height;
+                specTempCtx.drawImage(specCanvas, -1, 0);
+                specCtx.clearRect(0, 0, specCanvas.width, specCanvas.height);
+                specCtx.drawImage(specTempCanvas, 0, 0);
+
+                const sliceH = specCanvas.height / freqData.length;
+                for (let i = 0; i < freqData.length; i++) {
+                    const val = freqData[i];
+                    specCtx.fillStyle = `hsl(${240 - (val / 255) * 240}, 100%, 50%)`;
+                    specCtx.fillRect(specCanvas.width - 1, specCanvas.height - (i * sliceH), 1, sliceH);
+                }
             }
         }
+
+        function getExample(db) {
+            if (db < 40) return "🍀 図書館・静かな住宅街";
+            if (db < 60) return "🏢 普通の事務所・静かな室内";
+            if (db < 80) return "🚗 走行中の車内・騒々しい街頭";
+            if (db < 95) return "🚃 電車のガード下・カラオケ内";
+            return "📢 工場内・きわめてうるさい";
+        }
+
+        function switchScreen(id) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+        }
+
+        document.getElementById('start-btn').onclick = () => { if(!isMeasuring) startAudio(); };
+        document.getElementById('reset-btn').onclick = () => { totalDb = 0; count = 0; };
     </script>
 </body>
 </html>
