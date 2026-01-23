@@ -11,6 +11,14 @@
         .screen { display: none; padding: 10px; flex-direction: column; align-items: center; min-height: 100vh; box-sizing: border-box; }
         .active { display: flex; }
         
+        /* インストールボタンのエエリア */
+        #install-area { width: 100%; max-width: 500px; display: none; margin-bottom: 10px; }
+        #pwa-install-btn { 
+            width: 100%; padding: 15px; background: #ff9800; color: white; 
+            border: none; border-radius: 8px; font-weight: bold; cursor: pointer; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+
         .db-container { margin: 5px 0; }
         #db-value { font-size: 4rem; font-weight: bold; line-height: 1; }
         #db-example { color: #00ff00; font-size: 1.1rem; margin-top: 5px; height: 1.5rem; }
@@ -22,28 +30,11 @@
         }
         canvas { width: 100% !important; height: auto !important; }
 
-        /* レイアウト修正：縦軸とカラーバー */
         .flex-row { display: flex; width: 100%; align-items: stretch; gap: 8px; }
-        .y-axis-label { 
-            width: 35px; font-size: 0.7rem; color: #888; 
-            display: flex; flex-direction: column; justify-content: space-between; 
-            padding-bottom: 20px; /* X軸ラベル分の余白 */
-            text-align: right;
-        }
-
-        /* 凡例カラーバーの修正 */
+        .y-axis-label { width: 35px; font-size: 0.7rem; color: #888; display: flex; flex-direction: column; justify-content: space-between; padding-bottom: 20px; text-align: right; }
         .legend-container { display: flex; flex-direction: row; gap: 4px; padding-bottom: 20px; }
-        .legend-bar { 
-            width: 12px; 
-            min-height: 100px; /* 高さを確保 */
-            background: linear-gradient(to top, #0000ff, #00ffff, #00ff00, #ffff00, #ff0000); 
-            border-radius: 2px;
-            border: 1px solid #333;
-        }
-        .legend-labels { 
-            display: flex; flex-direction: column; justify-content: space-between; 
-            font-size: 0.65rem; color: #888; height: 100%;
-        }
+        .legend-bar { width: 12px; min-height: 100px; background: linear-gradient(to top, #0000ff, #00ffff, #00ff00, #ffff00, #ff0000); border-radius: 2px; border: 1px solid #333; }
+        .legend-labels { display: flex; flex-direction: column; justify-content: space-between; font-size: 0.65rem; color: #888; height: 100%; }
 
         .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; max-width: 500px; }
         button { padding: 15px; font-size: 1rem; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; color: white; }
@@ -57,6 +48,10 @@
 <body>
 
     <div id="main-screen" class="screen active">
+        <div id="install-area">
+            <button id="pwa-install-btn">📲 アプリをホーム画面に追加</button>
+        </div>
+
         <h2>[ Noise History ]</h2>
         <div class="db-container">
             <div id="db-value">0.0 dB</div>
@@ -76,7 +71,6 @@
 
     <div id="freq-screen" class="screen">
         <h2>[ FFT & Spectrogram ]</h2>
-        
         <div class="canvas-container">
             <div class="flex-row">
                 <div class="y-axis-label"><span>90</span><span>60</span><span>30</span><span>0</span></div>
@@ -88,7 +82,6 @@
                 </div>
             </div>
         </div>
-
         <div class="canvas-container">
             <div class="flex-row">
                 <div class="y-axis-label"><span>20k</span><span>10k</span><span>5k</span><span>Low</span></div>
@@ -97,14 +90,11 @@
                 </div>
                 <div class="legend-container">
                     <div class="legend-bar"></div>
-                    <div class="legend-labels">
-                        <span>90+</span><span>60</span><span>30</span><span>0</span>
-                    </div>
+                    <div class="legend-labels"><span>90+</span><span>60</span><span>30</span><span>0</span></div>
                 </div>
             </div>
             <p style="font-size: 0.7rem; color: #555; margin: 5px 0 0 0;">← 時間の流れ (dBカラー表示)</p>
         </div>
-
         <div class="controls" style="grid-template-columns: 1fr;">
             <button onclick="switchScreen('main-screen')" class="btn-gray">メイン画面に戻る</button>
         </div>
@@ -116,6 +106,34 @@
         let totalDb = 0, count = 0;
         let lastHistoryUpdate = 0;
 
+        // --- PWAインストールロジック ---
+        let deferredPrompt;
+        const installArea = document.getElementById('install-area');
+        const installBtn = document.getElementById('pwa-install-btn');
+
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            installArea.style.display = 'block';
+        });
+
+        installBtn.addEventListener('click', async () => {
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                const { outcome } = await deferredPrompt.userChoice;
+                if (outcome === 'accepted') {
+                    installArea.style.display = 'none';
+                }
+                deferredPrompt = null;
+            }
+        });
+
+        // サービスワーカー登録
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').then(() => console.log('SW registered'));
+        }
+
+        // --- 測定グラフ設定 ---
         const historyPoints = 100;
         const ctx = document.getElementById('historyChart').getContext('2d');
         const historyChart = new Chart(ctx, {
@@ -154,7 +172,7 @@
                 isMeasuring = true;
                 document.getElementById('start-btn').innerText = "測定中...";
                 update();
-            } catch (err) { alert("マイクを許可してください"); }
+            } catch (err) { alert("マイクの使用を許可してください"); }
         }
 
         function update() {
@@ -183,7 +201,6 @@
                 historyChart.update('none');
                 lastHistoryUpdate = now;
             }
-
             drawFFTAndSpec();
         }
 
@@ -191,18 +208,15 @@
             const freqData = new Uint8Array(analyser.frequencyBinCount);
             analyser.getByteFrequencyData(freqData);
 
-            // FFT描画
             fftCtx.fillStyle = '#111';
             fftCtx.fillRect(0, 0, fftCanvas.width, fftCanvas.height);
             const barWidth = fftCanvas.width / freqData.length;
             for (let i = 0; i < freqData.length; i++) {
                 const h = (freqData[i] / 255) * fftCanvas.height;
-                // 色をdB連動させる
                 fftCtx.fillStyle = `hsl(${240 - (freqData[i]/255)*240}, 100%, 50%)`;
                 fftCtx.fillRect(i * barWidth, fftCanvas.height - h, barWidth - 1, h);
             }
 
-            // スペクトログラム描画
             if (document.getElementById('freq-screen').classList.contains('active')) {
                 specTempCanvas.width = specCanvas.width;
                 specTempCanvas.height = specCanvas.height;
